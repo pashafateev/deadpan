@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated 2026-10-21.
+Last updated 2026-10-22.
 
 ## What deadpan is
 
@@ -24,9 +24,10 @@ a shared password.
   server should save each night's results to a file from day one so there is
   history to compare later.
 - **Rules:** use an existing library rather than writing poker rules ourselves.
-  Candidates are `@pokertools/engine` (preferred) and `poker-ts` (fallback).
-  Pick by running both through tricky hands (three-way all-in, short all-in,
-  heads-up blinds) before committing.
+  The user is choosing which one; the candidates found are in
+  [options-considered.md](options-considered.md#rules-libraries). Whichever is
+  picked, test it against tricky hands (three-way all-in, short all-in,
+  heads-up blinds) before relying on it.
 - **Gameplay extras:** turn timers, a time bank, and pre-action buttons
   (check/fold, check, call X, call any).
 - **Mockups:** made in Claude Design; components here get restyled to match.
