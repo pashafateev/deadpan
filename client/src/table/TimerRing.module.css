@@ -1,0 +1,21 @@
+.ring {
+  position: absolute;
+  inset: -5px;
+  width: calc(100% + 10px);
+  height: calc(100% + 10px);
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.track {
+  fill: none;
+  stroke: rgb(255 255 255 / 12%);
+  stroke-width: 6;
+}
+
+.progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+}

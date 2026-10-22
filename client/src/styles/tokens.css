@@ -1,0 +1,34 @@
+/* Placeholder look until the Claude Design mockups land: restyling should mostly
+   mean changing these values. */
+:root {
+  --bg: #0e1013;
+  --surface: #181b20;
+  --surface-raised: #22262d;
+  --border: #2e333b;
+  --text: #f3f2ee;
+  --text-muted: #9aa0a8;
+
+  --felt: #1d5443;
+  --felt-shade: #133a2e;
+  --rail: #0b1210;
+
+  --accent: #f4c34d;
+  --danger: #e2574c;
+  --positive: #5cc98a;
+
+  --card-face: #fbfaf6;
+  --card-red: #cf3a3a;
+  --card-black: #1c1e22;
+  --card-back: #3155a8;
+  --card-back-pattern: #4069c4;
+
+  --chip: #e8e3d4;
+  --chip-edge: #c0392b;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --shadow: 0 6px 18px rgb(0 0 0 / 35%);
+}

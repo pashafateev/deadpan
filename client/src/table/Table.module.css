@@ -1,0 +1,117 @@
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+
+.feltArea {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+}
+
+.felt {
+  position: absolute;
+  inset: 12% 9% 16%;
+  border: 12px solid var(--rail);
+  border-radius: 999px;
+  background: radial-gradient(ellipse at 50% 40%, var(--felt), var(--felt-shade) 75%);
+  box-shadow:
+    inset 0 0 50px rgb(0 0 0 / 45%),
+    0 20px 60px rgb(0 0 0 / 50%);
+}
+
+.feltArea[data-crowded='true'] {
+  --compact-avatar: 30px;
+  --compact-card: 18px;
+}
+
+.table[data-layout='phone'] .felt {
+  inset: 20% 4% 0;
+  border-width: 8px;
+  border-radius: 46% 46% 32px 32px / 30% 30% 32px 32px;
+}
+
+/* Everything placed on the felt is positioned by its centre. */
+.slot,
+.center,
+.bet {
+  position: absolute;
+  translate: -50% -50%;
+}
+
+.slot {
+  z-index: 2;
+}
+
+.center {
+  z-index: 1;
+  --card-w: min(7cqw, 11cqh, 76px);
+}
+
+.table[data-layout='phone'] .center {
+  --card-w: min(15cqw, 11cqh, 64px);
+}
+
+.bet {
+  z-index: 1;
+}
+
+.effects {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.sitHere {
+  min-width: 88px;
+  min-height: 44px;
+  border: 1.5px dashed rgb(255 255 255 / 30%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 25%);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sitHere:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.emptySeat {
+  width: 44px;
+  height: 44px;
+  border: 1.5px dashed rgb(255 255 255 / 12%);
+  border-radius: 50%;
+}
+
+.hero {
+  display: flex;
+  justify-content: center;
+  min-height: 72px;
+}
+
+.sitDown {
+  align-self: center;
+  min-height: 52px;
+  padding: 0 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #1a1405;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.controls {
+  width: 100%;
+  max-width: 560px;
+  min-height: 52px;
+  margin: 0 auto;
+}
