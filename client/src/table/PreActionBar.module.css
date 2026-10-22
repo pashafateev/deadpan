@@ -1,0 +1,42 @@
+.bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.option[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.option[aria-pressed='true'] .box {
+  border-color: var(--accent);
+  background: var(--accent);
+}

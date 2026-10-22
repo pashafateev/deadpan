@@ -1,0 +1,52 @@
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.pot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 35%);
+  font-weight: 700;
+  transition: opacity 0.3s;
+}
+
+.pot[data-empty='true'] {
+  opacity: 0;
+}
+
+.potLabel {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sidePots {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.board {
+  display: flex;
+  gap: calc(var(--card-w) * 0.12);
+}
+
+.slot {
+  width: var(--card-w);
+  aspect-ratio: 5 / 7;
+  border-radius: calc(var(--card-w) * 0.1);
+  border: 1.5px dashed rgb(255 255 255 / 14%);
+}
