@@ -2,7 +2,8 @@
 
 A private Texas Hold'em table for playing with friends, on phones and desktop.
 
-See [docs/decisions.md](docs/decisions.md) for what's been decided so far.
+Planning notes are in [docs/](docs/README.md), starting with
+[decisions.md](docs/decisions.md). `CLAUDE.md` has the conventions for working here.
 
 ## Running it
 
