@@ -2,7 +2,8 @@
 
 A private Texas Hold'em web app for one group of friends: play chips, one table
 of 2–9 players, phone and desktop, entry by a shared password. Read
-`docs/decisions.md` first; `docs/README.md` lists the other planning docs.
+`docs/handoff.md` for the current state and backlog, then `docs/decisions.md`;
+`docs/README.md` lists the other planning docs.
 
 ## Commands
 
