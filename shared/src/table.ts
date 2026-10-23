@@ -39,12 +39,17 @@ export interface Pot {
 }
 
 export interface TurnClock {
-  seat: number;
   /** Epoch milliseconds when this turn started. */
   startedAt: number;
   durationMs: number;
   /** Extra time the acting player can still use. */
   timeBankMs: number;
+}
+
+export interface TableTurn {
+  seat: number;
+  /** null means there is an actor but no time limit. */
+  clock: TurnClock | null;
 }
 
 /** Present only when it is the viewer's turn. Amounts are totals for the street. */
@@ -76,8 +81,9 @@ export interface Winner {
 }
 
 export interface TableSnapshot {
-  /** Increases with every message, so a client can tell when it missed some. */
+  /** Table-state revision: advances once per accepted game-changing request. */
   seq: number;
+  handStatus: 'waiting' | 'playing' | 'complete';
   maxSeats: number;
   seats: SeatView[];
   /** The viewer's seat, or null when they are not seated. */
@@ -91,10 +97,12 @@ export interface TableSnapshot {
   board: Card[];
   /** Chips already collected into pots, not counting bets on the current street. */
   pots: Pot[];
-  /** The highest bet on the current street. */
+  /** The effective street wager to match, including a full preflop bring-in. */
   currentBet: number;
-  turn: TurnClock | null;
+  turn: TableTurn | null;
   legalActions: LegalActions | null;
+  /** Whether the server supports queueing actions before the viewer's turn. */
+  preActionsEnabled: boolean;
   preAction: PreAction | null;
   winners: Winner[];
 }

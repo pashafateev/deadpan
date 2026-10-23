@@ -39,7 +39,23 @@ setting, and stick to standard web features.
 
 ## Rules libraries
 
-The user is choosing the library. What was found on 2026-10-17:
+**Selected: `@pokertools/engine@2.1.0`, engine only.** The user approved switching
+after the initial `poker-ts@1.5.0` checks failed. A focused sandbox evaluation
+passed 16 rules tests (including 200 repeatable sample hands), recovery/privacy
+diagnostics, and a TypeScript 7.0.2 import check. This is not a complete audit;
+keep these scenarios in adapter regression tests.
+
+`poker-ts` incorrectly reopened betting after a short all-in and removed an
+all-in player from main-pot eligibility when opponents bet on a later street.
+It also lacks a supported snapshot/restore or deterministic-deck API. We are
+not maintaining a rules fork to fix these.
+
+The upstream `@pokertools/api` is a separate, private-package application with
+authentication, persistence, Redis/workers, and financial integrations. We are
+not adopting that architecture: the engine works with our own one-process
+WebSocket server and snapshot format.
+
+Historical comparison, investigated on 2026-10-17 (usage figures are not current):
 
 - **[@pokertools/engine](https://www.npmjs.com/package/@pokertools/engine)**
   (MIT): first release November 2025, actively updated, one maintainer, about
@@ -66,7 +82,7 @@ PokerTH. Forking one would get something running sooner but means inheriting
 its look and layout, which is the part this project cares most about. Neither
 was checked for quality.
 
-Whichever library is picked, test it against tricky hands before relying on
+Test the selected library against tricky hands before relying on
 it: a three-way all-in with different stacks, a short all-in, heads-up blinds,
 a split pot with an odd chip, and an uncalled bet being returned.
 

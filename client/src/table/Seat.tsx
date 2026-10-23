@@ -1,4 +1,4 @@
-import type { Card, PlayerView, TurnClock, Winner } from '@deadpan/shared';
+import type { Card, PlayerView, TableTurn, Winner } from '@deadpan/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { AnimatedChips } from './ChipCount';
 import { PlayingCard } from './PlayingCard';
@@ -11,7 +11,7 @@ interface Props {
   player: PlayerView;
   size: SeatSize;
   /** Set only while it is this player's turn. */
-  turn: TurnClock | null;
+  turn: TableTurn | null;
   badges: string[];
   winner?: Winner;
 }
@@ -26,9 +26,15 @@ const sameCard = (a: Card, b: Card) => a.rank === b.rank && a.suit === b.suit;
 
 export function Seat({ player, size, turn, badges, winner }: Props) {
   const { cards } = player;
-  const statusLabel = STATUS_LABEL[player.status];
+  const statusLabel = turn ? 'To act' : STATUS_LABEL[player.status];
   return (
-    <div className={styles.seat} data-size={size} data-status={player.status} data-winner={Boolean(winner)}>
+    <div
+      className={styles.seat}
+      data-size={size}
+      data-status={player.status}
+      data-acting={Boolean(turn)}
+      data-winner={Boolean(winner)}
+    >
       <div className={styles.cards} data-shown={cards.kind === 'shown'}>
         <AnimatePresence>
           {cards.kind !== 'none' &&
@@ -56,7 +62,7 @@ export function Seat({ player, size, turn, badges, winner }: Props) {
 
       <div className={styles.plate}>
         <div className={styles.avatar}>
-          {turn && <TimerRing turn={turn} />}
+          {turn?.clock && <TimerRing clock={turn.clock} />}
           <span aria-hidden>{player.avatar}</span>
         </div>
         <div className={styles.info}>
