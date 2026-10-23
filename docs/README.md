@@ -1,7 +1,10 @@
 # Docs
 
-Planning notes for deadpan. Start with the decisions.
+Planning notes for deadpan. For where things stand right now, start with the
+handoff; for what's settled, the decisions.
 
+- [handoff.md](handoff.md): the current state of the repo, the backlog, and
+  what's waiting on whom.
 - [decisions.md](decisions.md): what's settled and what's deferred.
 - [scope.md](scope.md): how big the project is, the hard parts, the stages, and
   what's out of scope.
