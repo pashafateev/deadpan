@@ -15,13 +15,13 @@ breaks the other fails to compile instead of failing during a game.
 `shared/src/table.ts` defines `TableSnapshot`, the table as one player is
 allowed to see it.
 
-**`server/`** (not built yet) is one Node process. It also serves the app's
-files, so there is one thing to deploy. It has three parts:
+**`server/`** is one Node process. The local milestone exposes only WebSocket;
+serving built app files on the same port is later #3 work. Its modules are:
 
-- **Gate:** checks the shared password when someone connects, then gives their
+- **Gate** (later): checks the shared password when someone connects, then gives their
   browser a session token so a refresh or reconnect doesn't ask again.
-- **Table room:** the one live table. It owns the seats, turn timers,
-  pre-actions, pauses between streets, and the nightly results file. Everything
+- **Table room:** the one live table. It owns connections and the game revision;
+  timers, pre-actions, pacing, and saved nightly results are later work. Everything
   a player does arrives as a request, like "I raise to 60", which the table
   room checks before applying.
 - **Engine adapter:** a thin wrapper around the rules library with four
@@ -41,6 +41,92 @@ files, so there is one thing to deploy. It has three parts:
 
 The server address must be a setting, not assumed to be the page's own origin,
 so the app can be wrapped with Capacitor later if wanted.
+
+## Selected engine and recovery boundary
+
+Use `@pokertools/engine@2.1.0` on the server, not its upstream API application.
+The engine advances streets and settles pots; our adapter translates its
+outputs and never repairs or reimplements poker rules.
+
+The [public API](https://unpkg.com/@pokertools/engine@2.1.0/dist/engine/poker-engine.d.ts)
+provides `randomProvider` configuration for repeatable test deals, `snapshot`,
+and `PokerEngine.restore(snapshot)`. JSON round-trip tests must cover an active
+hand with unequal all-in pots and identical continuation through payout.
+The [serializer](https://unpkg.com/@pokertools/engine@2.1.0/dist/utils/serialization.js)
+preserves the current hand's remaining deck and restores map-backed fields.
+
+Exact current-hand restoration does not mean every process detail is saved:
+JSON drops custom RNG functions, a restored engine uses a new clock provider,
+and undo history is bounded. A later new deal uses secure randomness by default.
+Snapshots have no schema version or comprehensive public validation gate.
+Future [#9](https://github.com/pashafateev/deadpan/issues/9) must add a
+versioned/validated envelope, room metadata, and storage. None is implemented
+in this in-memory milestone.
+
+Do not forward the library's full view or snapshot to clients. Its public-view
+masker clears the deck and undo states, but includes config and action history;
+our outbound `TableSnapshot` remains an explicit allowlist of permitted fields.
+The rejected `poker-ts` findings are recorded in
+[options-considered.md](options-considered.md#rules-libraries).
+
+The adapter's `deal`, `act`, and `view` operations use only public engine APIs.
+Actions are validated before application. Legal raise totals come from the
+engine's range and validation, not from UI arithmetic. Payable calls come from
+the engine's preview action record: subtracting final stacks would be wrong
+when a call immediately pays out a winning hand. Views copy permitted fields,
+hide opponents' folded cards, retain the viewer's own folded cards, and aggregate
+per-pot awards per winning seat. Over-stack raises are rejected rather than
+letting the library clamp them to all-in. Completed funded players no longer
+carry the library's retained all-in betting status.
+
+At each new deal, the adapter restores an in-memory public snapshot without
+prior undo history. This prevents recursive history from retaining every
+previous hand while preserving stacks, cards, button, and the injected RNG.
+Multi-hand tests pin reachable history and compare uninterrupted continuation.
+This is memory compaction, not persistent recovery.
+
+## Current local table protocol
+
+- Two fixed players (`dev-a` and `dev-b`) begin with 1,000 chips and 5/10 blinds.
+  Their IDs do not depend on display names or seat indices. No account, password,
+  settings store, or database is involved.
+- A connection first identifies its fixed player ID. A second controller for
+  the same ID is rejected rather than replacing the first.
+- `deal` and `act` requests carry `expectedSeq` plus a positive `requestId`.
+  Only a matching `replyTo` acknowledges that request. Peer updates and late
+  errors cannot clear another pending submission. `TableSnapshot.seq` is the
+  current game version, advanced once per accepted request; joins and rejected
+  requests do not advance it. Check/apply/publish happens without an async gap.
+- Only a bound player's own turn can change the hand. Decode JSON into
+  allowlisted message fields and validate whole-chip amounts before the engine.
+- Each snapshot explicitly reports `handStatus` as waiting, playing, or
+  complete. A fold can finish a hand on its existing betting street.
+- `turn` is either absent (`null`) or an acting seat plus an optional `clock`.
+  A null clock means no time limit, not no actor. The live table has no clock;
+  timed playground fixtures still do.
+- Only the acting viewer gets `legalActions`. Street-total raises and stack-capped
+  calls come from the engine. `preActionsEnabled` is false on the live table and
+  `preAction` is null; the playground retains its advance-action controls.
+- Both players must be connected and funded to deal manually. Completed hands
+  remain visible until another deal, which preserves stacks and moves the button.
+  A bust stops further dealing; restart the development server to reset.
+- All-in runouts and settlement happen through the engine without artificial
+  delays. Paid-out snapshots clear live bets/pots and aggregate each winner's
+  awards, preventing chips from being displayed twice.
+- Closing a connection releases only its controller. It does not fold a hand,
+  change seats, advance the version, or reset stacks. A deliberately opened
+  fresh connection identifies again and gets the current private snapshot.
+  Remaining controllers get same-version presence snapshots showing the offline
+  seat and its restored status on rejoin.
+- Publication failures are isolated per controller after commit. An unusable
+  view/socket closes; healthy peers receive the applied game revision instead of
+  an error falsely claiming the accepted action failed.
+- Browser WebSocket origins must be HTTP/HTTPS loopback origins. Native local
+  tools may omit Origin. A permanent server-error listener handles errors after
+  startup; this does not add public hosting or production authentication.
+- Restarting the server resets the table and version. Persistent recovery,
+  automatic reconnect, timers, production access, and animation events remain
+  separate changes.
 
 ## How a hand flows (proposed)
 
@@ -99,7 +185,5 @@ within a moment.
 - Does the next hand start automatically? Proposed: yes.
 - Timer and time-bank lengths, and how long to wait before sitting someone out.
 - How long a disconnected player keeps their seat.
-- Hosting provider. Direction: one small always-on Node server; Cloudflare
+- Hosting provider. Direction: one small Node server that sleeps when unused; Cloudflare
   Durable Objects was the alternative mentioned.
-- Which rules library. The user is choosing; candidates are in
-  [options-considered.md](options-considered.md#rules-libraries).

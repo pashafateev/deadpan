@@ -23,11 +23,16 @@ a shared password.
 - **Chips:** stacks reset each game night. Comparing nights is post-MVP, but the
   server should save each night's results to a file from day one so there is
   history to compare later.
-- **Rules:** use an existing library rather than writing poker rules ourselves.
-  The user is choosing which one; the candidates found are in
-  [options-considered.md](options-considered.md#rules-libraries). Whichever is
-  picked, test it against tricky hands (three-way all-in, short all-in,
-  heads-up blinds) before relying on it.
+- **Rules:** use `@pokertools/engine@2.1.0`, wrapped on the server, rather than
+  writing poker rules ourselves. The user approved switching after `poker-ts`
+  failed short-all-in and side-pot tests. Keep those scenarios, heads-up blinds,
+  split pots, uncalled returns, and recovery as regression tests.
+- **Engine, not upstream application:** use the published engine package only.
+  Keep our one Node server and WebSocket message format; do not adopt the
+  upstream API's authentication, database, workers, or financial architecture.
+- **First live milestone:** two fixed development players on one computer,
+  manual dealing, private snapshots, and no turn deadlines. Login, persistence,
+  deployment, automatic reconnect, and new event-driven animations come later.
 - **Gameplay extras:** turn timers, a time bank, and pre-action buttons
   (check/fold, check, call X, call any).
 - **Mockups:** made in Claude Design; components here get restyled to match.
@@ -48,5 +53,5 @@ a shared password.
 - Timer lengths, timeout behavior, and pauses between streets.
 - Showdown rules (proposed: everyone still in shows their cards) and whether the
   next hand starts automatically (proposed: yes).
-- Reconnection details, hosting, and the final rules-library pick.
+- Reconnection details and hosting.
 - Comparing results across nights.

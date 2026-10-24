@@ -4,6 +4,7 @@ import { ActionBar } from './ActionBar';
 import { potTotal } from './betting';
 import { ChipCount } from './ChipCount';
 import { Confetti } from './Confetti';
+import { tableControls, turnForSeat } from './display';
 import { arcPositions, clockwiseFrom, ellipsePositions, type Point } from './layout';
 import { PreActionBar } from './PreActionBar';
 import { Seat } from './Seat';
@@ -75,7 +76,7 @@ export function Table({ snapshot, onAct, onPreAction, onSit }: Props) {
     placed.find((p) => p.index === index)?.point ?? (index === mySeat ? PHONE_MY_BET : center);
   const betPoint = (index: number): Point =>
     phone && index === mySeat ? PHONE_MY_BET : towards(seatPoint(index), center, BET_DISTANCE);
-  const turnFor = (index: number) => (snapshot.turn?.seat === index ? snapshot.turn : null);
+  const turnFor = (index: number) => turnForSeat(snapshot, index);
   const winnerFor = (index: number) => snapshot.winners.find((winner) => winner.seat === index);
   const badgesFor = (index: number) =>
     [
@@ -88,6 +89,7 @@ export function Table({ snapshot, onAct, onPreAction, onSit }: Props) {
   const bigWin = snapshot.winners.find((winner) => winner.amount >= BIG_POT_IN_BLINDS * snapshot.blinds.big);
   const betsOnTable = seats.map((seat) => seat.player?.bet ?? 0);
   const percent = ({ x, y }: Point) => ({ left: `${x}%`, top: `${y}%` });
+  const controls = tableControls(snapshot);
 
   return (
     <div ref={ref} className={styles.table} data-layout={phone ? 'phone' : 'desktop'}>
@@ -166,7 +168,7 @@ export function Table({ snapshot, onAct, onPreAction, onSit }: Props) {
       )}
 
       <div className={styles.controls}>
-        {me && snapshot.legalActions ? (
+        {controls === 'actions' && snapshot.legalActions ? (
           <ActionBar
             key={snapshot.seq}
             legal={snapshot.legalActions}
@@ -175,7 +177,7 @@ export function Table({ snapshot, onAct, onPreAction, onSit }: Props) {
             bigBlind={snapshot.blinds.big}
             onAct={onAct}
           />
-        ) : me && me.status === 'active' && snapshot.street !== null && snapshot.street !== 'showdown' ? (
+        ) : controls === 'pre-actions' && me ? (
           <PreActionBar
             callAmount={Math.min(snapshot.currentBet - me.bet, me.stack)}
             preAction={snapshot.preAction}

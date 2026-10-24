@@ -140,6 +140,7 @@ export function makeSnapshot(scenario: Scenario, playerCount: number, seq: numbe
 
   return {
     seq,
+    handStatus: scenario === 'showdown' ? 'complete' : 'playing',
     maxSeats: MAX_SEATS,
     seats: Array.from({ length: MAX_SEATS }, (_, index) => ({ index, player: players.get(index) ?? null })),
     mySeat: seated ? ME : null,
@@ -151,8 +152,12 @@ export function makeSnapshot(scenario: Scenario, playerCount: number, seq: numbe
     board,
     pots,
     currentBet,
-    turn: turnSeat === null ? null : { seat: turnSeat, startedAt: now, durationMs: TURN_MS, timeBankMs: 30_000 },
+    turn: turnSeat === null ? null : {
+      seat: turnSeat,
+      clock: { startedAt: now, durationMs: TURN_MS, timeBankMs: 30_000 },
+    },
     legalActions,
+    preActionsEnabled: true,
     preAction: null,
     winners,
   };

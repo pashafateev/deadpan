@@ -5,6 +5,7 @@
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "pnpm --filter @deadpan/client dev",
+    "dev:server": "pnpm --filter @deadpan/server dev",
     "build": "pnpm --filter @deadpan/client build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"

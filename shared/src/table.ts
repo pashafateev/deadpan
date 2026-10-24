@@ -4,13 +4,18 @@ import type { Card } from './cards';
 // every change; until the server exists, the client's playground builds it from
 // fake data. Components render only from this shape.
 
-export type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown';
+export const STREETS = ['preflop', 'flop', 'turn', 'river', 'showdown'] as const;
+export type Street = (typeof STREETS)[number];
 
-export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'sitting-out' | 'disconnected';
+export const PLAYER_STATUSES = ['active', 'folded', 'all-in', 'sitting-out', 'disconnected'] as const;
+export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
+
+export const HAND_STATUSES = ['waiting', 'playing', 'complete'] as const;
+export type HandStatus = (typeof HAND_STATUSES)[number];
 
 /** What this viewer can see of a player's two hole cards. */
 export type HoleCards =
-  | { kind: 'none' } // not dealt in, or folded
+  | { kind: 'none' } // not dealt in, or another player's folded hand
   | { kind: 'hidden' } // face down
   | { kind: 'shown'; cards: [Card, Card] }; // the viewer's own cards, or revealed at showdown
 
@@ -39,12 +44,17 @@ export interface Pot {
 }
 
 export interface TurnClock {
-  seat: number;
   /** Epoch milliseconds when this turn started. */
   startedAt: number;
   durationMs: number;
   /** Extra time the acting player can still use. */
   timeBankMs: number;
+}
+
+export interface TableTurn {
+  seat: number;
+  /** null means there is an actor but no time limit. */
+  clock: TurnClock | null;
 }
 
 /** Present only when it is the viewer's turn. Amounts are totals for the street. */
@@ -76,8 +86,9 @@ export interface Winner {
 }
 
 export interface TableSnapshot {
-  /** Increases with every message, so a client can tell when it missed some. */
+  /** Table-state revision: advances once per accepted game-changing request. */
   seq: number;
+  handStatus: HandStatus;
   maxSeats: number;
   seats: SeatView[];
   /** The viewer's seat, or null when they are not seated. */
@@ -91,10 +102,12 @@ export interface TableSnapshot {
   board: Card[];
   /** Chips already collected into pots, not counting bets on the current street. */
   pots: Pot[];
-  /** The highest bet on the current street. */
+  /** The effective street wager to match, including a full preflop bring-in. */
   currentBet: number;
-  turn: TurnClock | null;
+  turn: TableTurn | null;
   legalActions: LegalActions | null;
+  /** Whether the server supports queueing actions before the viewer's turn. */
+  preActionsEnabled: boolean;
   preAction: PreAction | null;
   winners: Winner[];
 }
