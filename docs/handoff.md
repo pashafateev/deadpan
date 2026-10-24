@@ -16,9 +16,15 @@ than the production launch. Update this file in the same PR as the change.
   settings, seat modes, persistence, timers/pre-actions, automatic reconnect,
   event playback, lobby, deployment, and sleep/wake. The server work only
   partially implements #3; do not close launch issues on this basis.
-- **Checks in this worktree:** `pnpm test` passes 159 tests in 14 files
-  (94 client, 65 server); `pnpm typecheck`, `pnpm build`, and
+- **Checks in this worktree:** `pnpm test` passes 283 tests in 15 files
+  (156 client, 127 server); `pnpm typecheck`, `pnpm build`, and
   `pnpm --filter @deadpan/server build` pass. There is no CI yet (#14).
+
+PR #24 review follow-up adds strict over-stack rejection, correlated request
+replies, same-version peer presence with visible offline status, isolated
+post-commit publication failures, local browser-origin checks, bounded engine
+history, settled status/own-folded-card fixes, and deep client decoding.
+Production access/reconnect/storage work remains deferred.
 
 ## Local playable-hand milestone
 
@@ -97,6 +103,10 @@ What has been checked, and what hasn't:
   cards, duplicate-controller rejection, fold/showdown/all-in payout, next
   hands, double taps, stale/out-of-turn errors, server loss, manual reconnect
   after restart/version reset, and the built server's startup.
+- **Review regressions:** browser checks additionally cover refused-first-connect
+  labeling, requester-only acknowledgements, over-stack rejection without
+  mutation, visible peer offline/rejoin state, own folded cards, settled all-in
+  labels, and rejection of a foreign browser page's WebSocket connection.
 - **Playground:** checked without a game server across all scenarios and 2, 6,
   and 9 players at both viewport sizes.
 - **Not checked yet:** a 320px-wide phone (iPhone SE), landscape phones, Safari
@@ -111,6 +121,9 @@ Gaps against `docs/design-brief.md`:
 - No sound.
 - No deal-from-the-deck, chips-to-pot or pot-to-winner animations. These need
   the event player.
+- Existing confetti particles can extend page scroll bounds during/following
+  a showdown burst. This predates the review fixes; static phone/desktop layout
+  checks pass. Leave clipping/removal of those particles as visual follow-up.
 
 ## Backlog
 

@@ -49,12 +49,18 @@ pnpm dev
 
 Both players must be connected and have chips before a deal. If a tab disconnects,
 its controls are disabled; reconnect manually to recover its current in-memory
-view. There are no turn deadlines, automatic reconnects, pre-actions, database,
+view. The other tab sees the disconnected seat without changing chips or turns.
+There are no turn deadlines, automatic reconnects, pre-actions, database,
 or new step-by-step animations. Restarting the server loses the game.
 
 The game server binds only `127.0.0.1`; phones cannot join this live fixture
 over the network. Test phone layout by resizing a browser to 375x812. The
 network-accessible fake-data playground is unaffected.
+
+Browser WebSocket connections must originate from loopback HTTP/HTTPS pages
+(`localhost`, `127.0.0.1`, or `::1`). Use Vite's **Local** address, not its
+**Network** address. Native local tools can connect without an Origin header;
+this is not authentication.
 
 To use another local port, configure both ends:
 

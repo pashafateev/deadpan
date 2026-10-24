@@ -2,7 +2,7 @@ import { DEVELOPMENT_PLAYERS } from '@deadpan/shared';
 import type { ClientMessage, PlayerAction } from '@deadpan/shared';
 
 export class InvalidMessage extends Error {
-  constructor() {
+  constructor(public readonly replyTo?: number) {
     super('Invalid message.');
   }
 }
@@ -13,8 +13,9 @@ const fields = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const revision = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const requestId = (value: unknown): value is number => revision(value) && value > 0;
 
-function action(value: unknown): PlayerAction {
+function action(value: unknown, replyTo?: number): PlayerAction {
   if (record(value)) {
     switch (value.kind) {
       case 'fold':
@@ -28,7 +29,7 @@ function action(value: unknown): PlayerAction {
         }
     }
   }
-  throw new InvalidMessage();
+  throw new InvalidMessage(replyTo);
 }
 
 /** Decode into fresh allowlisted values, never forward raw client objects. */
@@ -40,14 +41,18 @@ export function parseClientMessage(raw: string): ClientMessage {
     throw new InvalidMessage();
   }
   if (record(value)) {
+    const replyTo = requestId(value.requestId) ? value.requestId : undefined;
     if (value.kind === 'identify' && fields(value, ['kind', 'playerId'])) {
       const player = DEVELOPMENT_PLAYERS.find((candidate) => candidate.id === value.playerId);
       if (player) return { kind: 'identify', playerId: player.id };
-    } else if (value.kind === 'deal' && fields(value, ['kind', 'expectedSeq']) && revision(value.expectedSeq)) {
-      return { kind: 'deal', expectedSeq: value.expectedSeq };
-    } else if (value.kind === 'act' && fields(value, ['kind', 'expectedSeq', 'action']) && revision(value.expectedSeq)) {
-      return { kind: 'act', expectedSeq: value.expectedSeq, action: action(value.action) };
+    } else if (value.kind === 'deal' && fields(value, ['kind', 'expectedSeq', 'requestId'])
+      && revision(value.expectedSeq) && replyTo !== undefined) {
+      return { kind: 'deal', expectedSeq: value.expectedSeq, requestId: replyTo };
+    } else if (value.kind === 'act' && fields(value, ['kind', 'expectedSeq', 'requestId', 'action'])
+      && revision(value.expectedSeq) && replyTo !== undefined) {
+      return { kind: 'act', expectedSeq: value.expectedSeq, requestId: replyTo, action: action(value.action, replyTo) };
     }
+    throw new InvalidMessage(replyTo);
   }
   throw new InvalidMessage();
 }

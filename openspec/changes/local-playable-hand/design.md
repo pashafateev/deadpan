@@ -78,8 +78,9 @@ Keep the agreed message formats in `shared/`, so server and client use the same
 field names and meanings:
 
 - Client: identify a fixed development player by ID; request a deal with
-  `expectedSeq`; request an action with `expectedSeq` and `PlayerAction`.
+  `expectedSeq` and `requestId`; request an action with those fields and `PlayerAction`.
 - Server: a viewer-specific snapshot; or a bounded error code and safe message.
+  Replies to a game request echo its ID in `replyTo`; unsolicited snapshots do not.
 
 Check incoming message contents at runtime; TypeScript alone cannot validate
 network input. Reject invalid message kinds, unsupported player IDs,
@@ -108,7 +109,15 @@ Finish checking, applying, numbering, and sending one game change before
 processing the next request. Do not pause with an `await` between checking a
 version and updating the game, which could let two requests pass against the
 same old version. This prevents double taps and duplicate deals without
-separate request or turn IDs in this small, snapshot-only version.
+needing a separate turn ID. Request IDs serve a different purpose: only a
+matching reply resolves that connection's pending submission. A peer's game
+or presence update cannot acknowledge it, and an old error cannot unlock a
+newer request.
+
+Publish each controller's view independently after committing a game change.
+If a view/send fails, close that controller, keep publishing to healthy peers,
+and notify them of the lost presence. Do not report an applied action as
+rejected merely because its response could not be constructed.
 
 WebSocket provides one two-way channel for these messages on the same server.
 HTTP polling or HTTP plus server-sent events could also work; WebSocket is not
@@ -158,9 +167,11 @@ library's full table and rely on the UI to hide parts of it. Use the existing
 
 At a contested showdown, reveal the hands still contesting the pot. After an
 uncontested fold, do not automatically reveal either player's hand to the other.
+The folding player retains their own cards; other viewers never receive them.
 Winner details and error messages must not leak folded cards or private engine
 objects. Terminal snapshots show paid-out stacks and winner summaries, with
-settled bets/pots cleared so awards are not counted twice.
+settled bets/pots cleared so awards are not counted twice. Completed funded
+contenders are active, not still labelled all-in.
 
 Test the actual outgoing messages, including their JSON representation.
 "Serialization" means converting data into a sendable format. A screen showing
@@ -199,12 +210,21 @@ talks to itself, so both browser tabs and the game server run on the same machin
 The browser uses standard `WebSocket` and reads `VITE_SERVER_URL`, defaulting to
 a documented address on that machine.
 
+Loopback binding alone does not exclude foreign web pages. Check browser
+handshake origins against loopback HTTP/HTTPS origins (`localhost`, `127.0.0.1`,
+and `::1`). Native local clients may omit Origin; browsers cannot. This is a
+development boundary, not production authentication or a configurable public
+origin policy. Keep a server-error listener after startup as well as during listen.
+
 The first message selects a fixed development player by ID. If one tab already
 controls player A, another tab selecting A receives an error instead of taking
 over. It can select player B instead. After the server observes the first socket
 closing, a new connection can select A and receive the current private view.
 Closing a socket does not auto-fold, reset the hand, or give the opponent
-control. There is no automatic reconnect or seat-expiry policy.
+control. Publish presence changes to remaining controllers at the same game
+revision, marking uncontrolled seats disconnected. Rejoining restores the
+engine-derived status without changing chips or turn. There is no automatic
+reconnect or seat-expiry policy.
 
 This is not authentication. Label the live screen as local development. The
 existing network-accessible Vite playground can remain unchanged, but remote
@@ -219,7 +239,9 @@ The live toolbar chooses the development player and offers the deal control.
 A small client connection controller owns connection state, the last received
 snapshot, errors, and whether a request is awaiting a response. It does not
 calculate poker state. A snapshot with a newer version resolves a submitted
-request; an error also clears the waiting state. Connection closure disables
+request only when its `replyTo` matches; a matching error also clears the
+waiting state. Unsolicited newer or same-version presence snapshots update the
+view without clearing pending. Connection closure disables
 requests and requires a deliberate new connection. Do not submit another request
 while one is pending or while disconnected. Do not change chips, cards, or
 winners before receiving the server's snapshot.
@@ -266,6 +288,11 @@ separate work in [#4](https://github.com/pashafateev/deadpan/issues/4),
   Do not implement a persistent store or reconnect recovery in this milestone.
 - **Rejected requests must not change the game.** Validate before applying and
   test that illegal requests leave engine state and revision unchanged.
+- **Engine undo history retains recursive prior states.** At each new deal,
+  restore an in-memory public snapshot with prior undo history removed. Preserve
+  current cards, stacks, actor/button, and injected RNG; pin the reachable
+  history bound and continuation in multi-hand tests rather than relying on the
+  library's root-array cap.
 - **Snapshots may skip visual moments.** Accept this for the local
   milestone; future event playback can be added around the same authoritative
   snapshot boundary.

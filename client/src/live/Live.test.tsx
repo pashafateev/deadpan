@@ -31,6 +31,29 @@ describe('live screen markup', () => {
     expect(createSocket).not.toHaveBeenCalled();
   });
 
+  test.each(DEVELOPMENT_PLAYERS)('keeps Connect after the first identify is refused for $name', (player) => {
+    const { connection, sockets } = setup();
+    connection.connect(player.id);
+    const socket = sockets[0]!;
+    socket.open();
+    socket.message({ kind: 'error', code: 'player-in-use', message: 'This player is already connected.' });
+    expect(connection.getState().playerId).toBe(player.id);
+    expect(connection.getState().snapshot).toBeNull();
+    const html = renderToStaticMarkup(<Live connection={connection} />);
+    expect(html).toContain('This player is already connected.');
+    expect(html).toContain('>Connect</button>');
+    expect(html).not.toContain('>Reconnect</button>');
+  });
+
+  test('offers Reconnect after an accepted view disconnects', () => {
+    const { connection, socket } = connected();
+    socket.closed();
+    const html = renderToStaticMarkup(<Live connection={connection} />);
+    expect(html).toContain('Read-only view');
+    expect(html).toContain('>Reconnect</button>');
+    expect(html).not.toContain('>Connect</button>');
+  });
+
   test('renders an untimed active snapshot with controls and an acting highlight, not a countdown', () => {
     const { connection } = connected(playing());
     const html = renderToStaticMarkup(<Live connection={connection} />);
@@ -76,7 +99,7 @@ describe('live screen markup', () => {
   test('renders errors as escaped text and enables retry after a rejected request', () => {
     const { connection, socket } = connected();
     connection.deal(0);
-    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Need both players <not HTML>' });
+    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Need both players <not HTML>', replyTo: 1 });
     const html = renderToStaticMarkup(<Live connection={connection} />);
     expect(html).toContain('role="alert"');
     expect(html).not.toContain('<not HTML>');

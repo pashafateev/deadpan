@@ -4,6 +4,8 @@ import { EngineAdapter, RejectedRequest } from './engine/adapter';
 
 export interface Connection {
   send(message: ServerMessage): void;
+  /** Close an unusable view/transport so the client cannot keep acting stale. */
+  close(): void;
 }
 
 interface RoomOptions {
@@ -29,9 +31,9 @@ export class TableRoom {
       return;
     }
     const playerId = this.identities.get(connection);
-    if (!playerId) return this.error(connection, 'not-identified', 'Select a development player first.');
+    if (!playerId) return this.error(connection, 'not-identified', 'Select a development player first.', message.requestId);
     if (message.expectedSeq !== this.seq) {
-      return this.error(connection, 'stale-state', 'The table changed. Use the latest view and try again.');
+      return this.error(connection, 'stale-state', 'The table changed. Use the latest view and try again.', message.requestId);
     }
     try {
       if (message.kind === 'deal') {
@@ -39,29 +41,34 @@ export class TableRoom {
         if (this.controllers.size !== DEVELOPMENT_PLAYERS.length
           || view.handStatus === 'playing'
           || view.seats.some((seat) => !seat.player || seat.player.stack <= 0)) {
-          return this.error(connection, 'cannot-deal', 'Both players must be connected and have chips, with no hand in progress.');
+          return this.error(connection, 'cannot-deal', 'Both players must be connected and have chips, with no hand in progress.', message.requestId);
         }
         this.engine.deal();
       } else {
         const player = DEVELOPMENT_PLAYERS.find((candidate) => candidate.id === playerId)!;
         this.engine.act(player.seat, message.action);
       }
-      // No asynchronous work between checking the old version and committing
-      // the next one. A duplicate request cannot pass against the same state.
-      this.seq++;
-      for (const [id, controller] of this.controllers) {
-        controller.send({ kind: 'snapshot', snapshot: this.snapshot(id) });
-      }
     } catch (error) {
       if (!(error instanceof RejectedRequest)) throw error;
-      this.error(connection, error.code, error.message);
+      this.error(connection, error.code, error.message, message.requestId);
+      return;
     }
+    // Once applied, publication cannot turn the accepted action into a reported
+    // rejection. Failed viewers are closed independently; healthy peers advance.
+    this.seq++;
+    this.publish({ connection, requestId: message.requestId });
   }
 
   disconnect(connection: Connection): void {
+    if (this.remove(connection)) this.publish();
+  }
+
+  private remove(connection: Connection): boolean {
     const id = this.identities.get(connection);
+    if (!id) return false;
     if (id && this.controllers.get(id) === connection) this.controllers.delete(id);
     this.identities.delete(connection);
+    return true;
   }
 
   private identify(connection: Connection, id: DevelopmentPlayerId): void {
@@ -76,7 +83,7 @@ export class TableRoom {
     }
     this.identities.set(connection, id);
     this.controllers.set(id, connection);
-    connection.send({ kind: 'snapshot', snapshot: this.snapshot(id) });
+    this.publish();
   }
 
   private snapshot(id: DevelopmentPlayerId): TableSnapshot {
@@ -91,6 +98,7 @@ export class TableRoom {
           index: seat.index,
           player: seat.player && metadata ? {
             id: metadata.id, name: metadata.name, avatar: metadata.avatar, ...seat.player,
+            status: this.controllers.has(metadata.id) ? seat.player.status : 'disconnected',
           } : null,
         };
       }),
@@ -99,7 +107,44 @@ export class TableRoom {
     };
   }
 
-  private error(connection: Connection, code: RequestErrorCode, message: string): void {
-    connection.send({ kind: 'error', code, message });
+  private publish(receipt?: { connection: Connection; requestId: number }): void {
+    while (this.controllers.size > 0) {
+      const failed: Connection[] = [];
+      for (const [id, controller] of this.controllers) {
+        try {
+          controller.send({
+            kind: 'snapshot', snapshot: this.snapshot(id),
+            ...(controller === receipt?.connection ? { replyTo: receipt.requestId } : {}),
+          });
+        } catch (error) {
+          console.error('Could not publish local table view:', error);
+          failed.push(controller);
+        }
+      }
+      if (failed.length === 0) return;
+      for (const controller of failed) this.drop(controller);
+      // Notify surviving peers of lost presence at the same game revision.
+      // Each retry removes at least one failed controller, so this is bounded.
+      receipt = undefined;
+    }
+  }
+
+  private drop(connection: Connection): void {
+    this.remove(connection);
+    try {
+      connection.close();
+    } catch (error) {
+      console.error('Could not close local table connection:', error);
+    }
+  }
+
+  private error(connection: Connection, code: RequestErrorCode, message: string, replyTo?: number): void {
+    try {
+      connection.send({ kind: 'error', code, message, ...(replyTo === undefined ? {} : { replyTo }) });
+    } catch (error) {
+      console.error('Could not send local table error:', error);
+      this.drop(connection);
+      this.publish();
+    }
   }
 }

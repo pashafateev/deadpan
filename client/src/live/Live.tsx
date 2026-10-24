@@ -1,7 +1,7 @@
 import { DEVELOPMENT_PLAYERS, type DevelopmentPlayerId } from '@deadpan/shared';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Table } from '../table/Table';
-import { createConnection, getServerUrl } from './connection';
+import { createConnection } from './connection';
 import styles from './Live.module.css';
 
 interface Props {
@@ -13,13 +13,15 @@ const ignore = () => {};
 /** A local transport toolbar around the same snapshot-driven table as the playground. */
 export function Live({ connection: supplied }: Props) {
   const [connection] = useState(() => supplied ?? createConnection({
-    url: getServerUrl(import.meta.env.VITE_SERVER_URL),
+    url: import.meta.env.VITE_SERVER_URL,
   }));
   const state = useSyncExternalStore(connection.subscribe, connection.getState, connection.getState);
   const [playerId, setPlayerId] = useState<DevelopmentPlayerId>(
     () => state.playerId ?? DEVELOPMENT_PLAYERS[0].id,
   );
   const { snapshot, pending } = state;
+  const acceptedPlayerId = snapshot && snapshot.mySeat !== null
+    ? snapshot.seats[snapshot.mySeat]?.player?.id : null;
   const activeConnection = state.status !== 'disconnected';
   const canRequest = state.status === 'connected' && snapshot !== null && pending === null;
   const viewingPlayer = DEVELOPMENT_PLAYERS.find((player) => player.id === state.playerId);
@@ -62,7 +64,7 @@ export function Live({ connection: supplied }: Props) {
             <button className={styles.button} onClick={() => connection.disconnect()}>Disconnect</button>
           ) : (
             <button className={styles.button} onClick={() => connection.connect(playerId)}>
-              {state.playerId === playerId ? 'Reconnect' : 'Connect'}
+              {acceptedPlayerId === playerId ? 'Reconnect' : 'Connect'}
             </button>
           )}
           <button

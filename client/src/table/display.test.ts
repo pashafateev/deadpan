@@ -1,9 +1,26 @@
 import type { TableSnapshot, TableTurn } from '@deadpan/shared';
 import { describe, expect, test } from 'vitest';
 import { makeSnapshot, SCENARIOS } from '../playground/mocks';
-import { tableControls, turnForSeat } from './display';
+import { seatStatusLabel, tableControls, turnForSeat } from './display';
 
 const myTurn = () => makeSnapshot('my-turn', 6, 1, 1000);
+
+describe('seat status labels', () => {
+  test('an offline acting seat shows its connection status without losing the turn highlight', () => {
+    expect(seatStatusLabel('disconnected', true)).toBe('Offline');
+  });
+
+  test.each([
+    ['active', true, 'To act'],
+    ['active', false, null],
+    ['folded', false, null],
+    ['all-in', false, 'All in'],
+    ['sitting-out', false, 'Sitting out'],
+    ['disconnected', false, 'Offline'],
+  ] as const)('labels %s (acting=%s) as %s', (status, acting, label) => {
+    expect(seatStatusLabel(status, acting)).toBe(label);
+  });
+});
 
 describe('turnForSeat', () => {
   test('identifies an untimed acting seat without inventing a clock', () => {

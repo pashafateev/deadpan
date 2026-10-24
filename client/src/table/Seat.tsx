@@ -1,6 +1,7 @@
 import type { Card, PlayerView, TableTurn, Winner } from '@deadpan/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { AnimatedChips } from './ChipCount';
+import { seatStatusLabel } from './display';
 import { PlayingCard } from './PlayingCard';
 import styles from './Seat.module.css';
 import { TimerRing } from './TimerRing';
@@ -16,17 +17,11 @@ interface Props {
   winner?: Winner;
 }
 
-const STATUS_LABEL: Partial<Record<PlayerView['status'], string>> = {
-  'all-in': 'All in',
-  'sitting-out': 'Sitting out',
-  disconnected: 'Offline',
-};
-
 const sameCard = (a: Card, b: Card) => a.rank === b.rank && a.suit === b.suit;
 
 export function Seat({ player, size, turn, badges, winner }: Props) {
   const { cards } = player;
-  const statusLabel = turn ? 'To act' : STATUS_LABEL[player.status];
+  const statusLabel = seatStatusLabel(player.status, Boolean(turn));
   return (
     <div
       className={styles.seat}

@@ -1,25 +1,25 @@
-import { RANKS, SUITS, type PlayerView, type ServerMessage, type TableSnapshot } from '@deadpan/shared';
-
-const ERROR_CODES = [
-  'invalid-message', 'not-identified', 'player-in-use', 'stale-state',
-  'not-your-turn', 'illegal-action', 'cannot-deal', 'internal-error',
-];
+import {
+  HAND_STATUSES, PLAYER_STATUSES, RANKS, REQUEST_ERROR_CODES, STREETS, SUITS,
+  type Card, type PlayerView, type ServerMessage, type TableSnapshot,
+} from '@deadpan/shared';
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+const oneOf = <T extends string>(value: unknown, choices: readonly T[]): value is T =>
+  choices.some((choice) => value === choice);
 const chips = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const card = (value: unknown) =>
-  record(value) && RANKS.some((rank) => value.rank === rank) && SUITS.some((suit) => value.suit === suit);
+  record(value) && oneOf(value.rank, RANKS) && oneOf(value.suit, SUITS);
 const cards = (value: unknown) => Array.isArray(value) && value.every(card);
 const nullableChips = (value: unknown) => value === null || chips(value);
 
 function player(value: unknown): value is PlayerView {
   if (!record(value) || typeof value.id !== 'string' || typeof value.name !== 'string' ||
       typeof value.avatar !== 'string' || !chips(value.stack) || !chips(value.bet) ||
-      !['active', 'folded', 'all-in', 'sitting-out', 'disconnected'].includes(value.status as string) ||
+      !oneOf(value.status, PLAYER_STATUSES) ||
       !record(value.cards)) return false;
   const hand = value.cards;
   return hand.kind === 'none' || hand.kind === 'hidden' ||
@@ -52,13 +52,13 @@ function snapshot(value: unknown): value is TableSnapshot {
   const seat = (index: unknown) => chips(index) && index < maxSeats;
   const nullableSeat = (index: unknown) => index === null || seat(index);
 
-  return ['waiting', 'playing', 'complete'].includes(value.handStatus as string) &&
+  return oneOf(value.handStatus, HAND_STATUSES) &&
     value.seats.every((entry, index) => record(entry) && entry.index === index &&
       (entry.player === null || player(entry.player))) &&
     nullableSeat(value.mySeat) && nullableSeat(value.buttonSeat) &&
     nullableSeat(value.smallBlindSeat) && nullableSeat(value.bigBlindSeat) &&
     record(value.blinds) && chips(value.blinds.small) && chips(value.blinds.big) && value.blinds.big > 0 &&
-    (value.street === null || ['preflop', 'flop', 'turn', 'river', 'showdown'].includes(value.street as string)) &&
+    (value.street === null || oneOf(value.street, STREETS)) &&
     cards(value.board) && Array.isArray(value.pots) &&
     value.pots.every((pot) => record(pot) && chips(pot.amount) &&
       Array.isArray(pot.eligibleSeats) && pot.eligibleSeats.every(seat)) &&
@@ -68,6 +68,69 @@ function snapshot(value: unknown): value is TableSnapshot {
     preAction(value.preAction) && Array.isArray(value.winners) &&
     value.winners.every((winner) => record(winner) && seat(winner.seat) && chips(winner.amount) &&
       typeof winner.handLabel === 'string' && cards(winner.bestCards));
+}
+
+const copyCard = (value: Card): Card => ({ rank: value.rank, suit: value.suit });
+
+function copyPlayer(value: PlayerView): PlayerView {
+  return {
+    id: value.id,
+    name: value.name,
+    avatar: value.avatar,
+    stack: value.stack,
+    bet: value.bet,
+    status: value.status,
+    cards: value.cards.kind === 'shown'
+      ? { kind: 'shown', cards: [copyCard(value.cards.cards[0]), copyCard(value.cards.cards[1])] }
+      : { kind: value.cards.kind },
+  };
+}
+
+/** Validation permits extra wire fields; none may cross this allowlist into the UI. */
+function copySnapshot(value: TableSnapshot): TableSnapshot {
+  return {
+    seq: value.seq,
+    handStatus: value.handStatus,
+    maxSeats: value.maxSeats,
+    seats: value.seats.map((seat) => ({
+      index: seat.index,
+      player: seat.player === null ? null : copyPlayer(seat.player),
+    })),
+    mySeat: value.mySeat,
+    buttonSeat: value.buttonSeat,
+    smallBlindSeat: value.smallBlindSeat,
+    bigBlindSeat: value.bigBlindSeat,
+    blinds: { small: value.blinds.small, big: value.blinds.big },
+    street: value.street,
+    board: value.board.map(copyCard),
+    pots: value.pots.map((pot) => ({ amount: pot.amount, eligibleSeats: [...pot.eligibleSeats] })),
+    currentBet: value.currentBet,
+    turn: value.turn === null ? null : {
+      seat: value.turn.seat,
+      clock: value.turn.clock === null ? null : {
+        startedAt: value.turn.clock.startedAt,
+        durationMs: value.turn.clock.durationMs,
+        timeBankMs: value.turn.clock.timeBankMs,
+      },
+    },
+    legalActions: value.legalActions === null ? null : {
+      canFold: value.legalActions.canFold,
+      canCheck: value.legalActions.canCheck,
+      callAmount: value.legalActions.callAmount,
+      minRaiseTo: value.legalActions.minRaiseTo,
+      maxRaiseTo: value.legalActions.maxRaiseTo,
+    },
+    preActionsEnabled: value.preActionsEnabled,
+    preAction: value.preAction === null ? null : value.preAction.kind === 'call'
+      ? { kind: 'call', amount: value.preAction.amount }
+      : { kind: value.preAction.kind },
+    winners: value.winners.map((winner) => ({
+      seat: winner.seat,
+      amount: winner.amount,
+      handLabel: winner.handLabel,
+      bestCards: winner.bestCards.map(copyCard),
+    })),
+  };
 }
 
 /** Never pass arbitrary network objects (or thrown exceptions) to the UI. */
@@ -80,12 +143,14 @@ export function readServerMessage(data: unknown): ServerMessage | null {
     return null;
   }
   if (!record(value)) return null;
+  if (value.replyTo !== undefined && (!chips(value.replyTo) || value.replyTo === 0)) return null;
+  const reply = value.replyTo === undefined ? {} : { replyTo: value.replyTo };
   if (value.kind === 'snapshot' && snapshot(value.snapshot)) {
-    return { kind: 'snapshot', snapshot: value.snapshot };
+    return { kind: 'snapshot', snapshot: copySnapshot(value.snapshot), ...reply };
   }
-  if (value.kind === 'error' && ERROR_CODES.includes(value.code as string) &&
+  if (value.kind === 'error' && oneOf(value.code, REQUEST_ERROR_CODES) &&
       typeof value.message === 'string' && value.message.length <= 512) {
-    return { kind: 'error', code: value.code as Extract<ServerMessage, { kind: 'error' }>['code'], message: value.message };
+    return { kind: 'error', code: value.code, message: value.message, ...reply };
   }
   return null;
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { ActionType, PokerEngine, calculateTotalChips } from '@pokertools/engine';
+import type { GameState } from '@pokertools/engine';
 
 export const CARDS = Array.from({ length: 52 }, (_, code) => '23456789TJQKA'[code >> 2]! + 'shdc'[code & 3]!);
 export const ACES_BOARD = ['Ac', '2h', '7d', '9s', 'Js'];
@@ -47,6 +48,20 @@ export function rawEngine(stacks: number[], randomProvider = seededRandom()): Po
   stacks.forEach((stack, seat) => engine.sit(seat, `p${seat}`, `Player ${seat}`, stack));
   engine.deal();
   return engine;
+}
+
+/** Count the reachable graph, not just the capped root undo array. */
+export function reachableStates(state: GameState): GameState[] {
+  const seen = new Set<GameState>([state]);
+  const pending = [state];
+  for (let index = 0; index < pending.length; index++) {
+    for (const previous of pending[index]!.previousStates) {
+      if (seen.has(previous)) continue;
+      seen.add(previous);
+      pending.push(previous);
+    }
+  }
+  return pending;
 }
 
 export function assertConserved(engine: PokerEngine): void {

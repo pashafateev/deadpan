@@ -4,13 +4,18 @@ import type { Card } from './cards';
 // every change; until the server exists, the client's playground builds it from
 // fake data. Components render only from this shape.
 
-export type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown';
+export const STREETS = ['preflop', 'flop', 'turn', 'river', 'showdown'] as const;
+export type Street = (typeof STREETS)[number];
 
-export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'sitting-out' | 'disconnected';
+export const PLAYER_STATUSES = ['active', 'folded', 'all-in', 'sitting-out', 'disconnected'] as const;
+export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
+
+export const HAND_STATUSES = ['waiting', 'playing', 'complete'] as const;
+export type HandStatus = (typeof HAND_STATUSES)[number];
 
 /** What this viewer can see of a player's two hole cards. */
 export type HoleCards =
-  | { kind: 'none' } // not dealt in, or folded
+  | { kind: 'none' } // not dealt in, or another player's folded hand
   | { kind: 'hidden' } // face down
   | { kind: 'shown'; cards: [Card, Card] }; // the viewer's own cards, or revealed at showdown
 
@@ -83,7 +88,7 @@ export interface Winner {
 export interface TableSnapshot {
   /** Table-state revision: advances once per accepted game-changing request. */
   seq: number;
-  handStatus: 'waiting' | 'playing' | 'complete';
+  handStatus: HandStatus;
   maxSeats: number;
   seats: SeatView[];
   /** The viewer's seat, or null when they are not seated. */

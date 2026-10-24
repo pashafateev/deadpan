@@ -39,7 +39,7 @@ function card(code: string): Card {
 
 /** The only production boundary that knows the rules library's state and API. */
 export class EngineAdapter {
-  private readonly engine: PokerEngine;
+  private engine: PokerEngine;
   private smallBlindSeat: number | null = null;
   private lastBettingStreet: Street | null = null;
 
@@ -61,6 +61,10 @@ export class EngineAdapter {
       throw new RejectedRequest('cannot-deal', 'A new hand cannot be dealt now.');
     }
     this.engine.deal();
+    // The live undo graph recursively retains prior hands despite its root cap.
+    // Start each hand with only its current state through supported APIs. Keep
+    // this snapshot in memory: JSON would discard the injected randomProvider.
+    this.engine = PokerEngine.restore({ ...this.engine.snapshot, previousStates: [] });
     const state = this.engine.state;
     // Posted blinds identify positions without recalculating the engine's rules.
     // In an immediate heads-up all-in runout, bets are already paid out.
@@ -70,11 +74,17 @@ export class EngineAdapter {
   }
 
   act(seat: number, action: PlayerAction): void {
-    if (this.engine.state.actionTo !== seat || this.engine.state.winners !== null) {
+    const state = this.engine.state;
+    if (state.actionTo !== seat || state.winners !== null) {
       throw new RejectedRequest('not-your-turn', 'It is not your turn.');
     }
-    if (action.kind === 'raise' && (!Number.isSafeInteger(action.to) || action.to < 0)) {
-      throw new RejectedRequest('illegal-action', 'Choose a legal whole-chip amount.');
+    if (action.kind === 'raise') {
+      const player = state.players[seat]!;
+      // The library clamps excessive BET/RAISE totals to all-in. Our protocol
+      // requires the requested total itself to fit the advertised stack limit.
+      if (!Number.isSafeInteger(action.to) || action.to < 0 || action.to > player.stack + player.betThisStreet) {
+        throw new RejectedRequest('illegal-action', 'Choose a legal whole-chip amount within your stack.');
+      }
     }
     const request = this.action(seat, action);
     if (!this.engine.validate(request).valid) {
@@ -97,15 +107,20 @@ export class EngineAdapter {
       seats: state.players.map((player, index) => {
         if (!player) return { index, player: null };
         const folded = player.status === EngineStatus.FOLDED;
-        const shown = !folded && (index === viewerSeat || (complete && contested));
-        const cards: PokerPlayer['cards'] = !player.hand || folded
+        const own = index === viewerSeat;
+        const shown = own || (!folded && complete && contested);
+        const cards: PokerPlayer['cards'] = !player.hand || (folded && !own)
           ? { kind: 'none' }
           : shown
             ? { kind: 'shown', cards: [card(player.hand[0]!), card(player.hand[1]!)] }
             : { kind: 'hidden' };
+        // ALL_IN is a betting status the library retains after payout, not a
+        // completed-hand status. Preserve folds and distinguish busted players.
+        const sittingOut = player.status === EngineStatus.SITTING_OUT || player.status === EngineStatus.BUSTED
+          || (complete && player.stack === 0);
         const status: PokerPlayer['status'] = folded ? 'folded'
-          : player.status === EngineStatus.ALL_IN ? 'all-in'
-            : player.status === EngineStatus.SITTING_OUT || player.status === EngineStatus.BUSTED ? 'sitting-out' : 'active';
+          : sittingOut ? 'sitting-out'
+            : !complete && player.status === EngineStatus.ALL_IN ? 'all-in' : 'active';
         return { index, player: { stack: player.stack, bet: state.currentBets.get(index) ?? 0, status, cards } };
       }),
       buttonSeat: state.buttonSeat,

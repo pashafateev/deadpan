@@ -74,7 +74,16 @@ Actions are validated before application. Legal raise totals come from the
 engine's range and validation, not from UI arithmetic. Payable calls come from
 the engine's preview action record: subtracting final stacks would be wrong
 when a call immediately pays out a winning hand. Views copy permitted fields,
-hide folded/opponents' cards, and aggregate per-pot awards per winning seat.
+hide opponents' folded cards, retain the viewer's own folded cards, and aggregate
+per-pot awards per winning seat. Over-stack raises are rejected rather than
+letting the library clamp them to all-in. Completed funded players no longer
+carry the library's retained all-in betting status.
+
+At each new deal, the adapter restores an in-memory public snapshot without
+prior undo history. This prevents recursive history from retaining every
+previous hand while preserving stacks, cards, button, and the injected RNG.
+Multi-hand tests pin reachable history and compare uninterrupted continuation.
+This is memory compaction, not persistent recovery.
 
 ## Current local table protocol
 
@@ -83,7 +92,9 @@ hide folded/opponents' cards, and aggregate per-pot awards per winning seat.
   settings store, or database is involved.
 - A connection first identifies its fixed player ID. A second controller for
   the same ID is rejected rather than replacing the first.
-- `deal` and `act` requests carry `expectedSeq`. `TableSnapshot.seq` is the
+- `deal` and `act` requests carry `expectedSeq` plus a positive `requestId`.
+  Only a matching `replyTo` acknowledges that request. Peer updates and late
+  errors cannot clear another pending submission. `TableSnapshot.seq` is the
   current game version, advanced once per accepted request; joins and rejected
   requests do not advance it. Check/apply/publish happens without an async gap.
 - Only a bound player's own turn can change the hand. Decode JSON into
@@ -105,6 +116,14 @@ hide folded/opponents' cards, and aggregate per-pot awards per winning seat.
 - Closing a connection releases only its controller. It does not fold a hand,
   change seats, advance the version, or reset stacks. A deliberately opened
   fresh connection identifies again and gets the current private snapshot.
+  Remaining controllers get same-version presence snapshots showing the offline
+  seat and its restored status on rejoin.
+- Publication failures are isolated per controller after commit. An unusable
+  view/socket closes; healthy peers receive the applied game revision instead of
+  an error falsely claiming the accepted action failed.
+- Browser WebSocket origins must be HTTP/HTTPS loopback origins. Native local
+  tools may omit Origin. A permanent server-error listener handles errors after
+  startup; this does not add public hosting or production authentication.
 - Restarting the server resets the table and version. Persistent recovery,
   automatic reconnect, timers, production access, and animation events remain
   separate changes.

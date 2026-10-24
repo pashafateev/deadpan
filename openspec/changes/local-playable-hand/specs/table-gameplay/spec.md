@@ -68,6 +68,17 @@ Rejected requests SHALL leave the game unchanged and return a useful error.
 - **THEN** no game state changes and the requester receives an error
 - **AND** the server remains able to process a subsequent valid request
 
+#### Scenario: Reject an amount above the advertised stack limit
+- **WHEN** a player requests a raise total greater than their stack plus existing
+  street bet
+- **THEN** the server rejects it without clamping it to all-in or changing chips
+
+#### Scenario: Isolate a response failure after an accepted action
+- **WHEN** an accepted action changes the game but one controller's view cannot
+  be constructed or sent
+- **THEN** healthy controllers still receive the committed revision
+- **AND** the unusable connection closes without reporting the applied action as rejected
+
 ### Requirement: Revision-checked state changes
 
 Every action and deal request SHALL identify the table revision it was based on.
@@ -83,6 +94,19 @@ viewer-specific snapshots at the same new revision.
 #### Scenario: Reject a delayed deal
 - **WHEN** a deal request arrives after another request has already started a hand
 - **THEN** the delayed request cannot deal again or reset the new hand
+
+### Requirement: Correlated game replies
+
+The client SHALL assign distinct positive safe-integer `requestId` values to
+game requests on a connection. Replies to a well-formed game request SHALL echo
+that ID as `replyTo` only to its requesting connection. Unsolicited game or
+presence updates SHALL NOT acknowledge another pending request.
+
+#### Scenario: Competing requests use the same game revision
+- **WHEN** one player's deal is accepted and the other player's concurrent deal
+  is rejected as stale
+- **THEN** each player's reply identifies their own request
+- **AND** receiving the peer's accepted update does not resolve the losing request
 
 ### Requirement: Private player views
 
@@ -105,6 +129,7 @@ merely hidden by the UI.
 - **WHEN** a hand ends because one player folds
 - **THEN** neither player's hole cards are newly revealed to the other player
 - **AND** messages do not expose folded cards through result or error details
+- **AND** the folding player retains their own hole cards in their private view
 
 ### Requirement: Actionable table snapshots
 
@@ -132,6 +157,7 @@ totals. An untimed active turn SHALL be distinguishable from no active turn.
 - **WHEN** the hand has settled
 - **THEN** snapshots indicate completion with no acting turn or legal actions
 - **AND** the UI offers no betting or pre-action controls for that hand
+- **AND** funded contenders are not labelled as still all-in
 
 ### Requirement: Correct betting and settlement
 
@@ -183,6 +209,12 @@ connection is unavailable. It SHALL support a configurable server address.
 - **THEN** the client prevents another submission until a response resolves it
 - **AND** stacks, board, and winners change only when a snapshot arrives
 
+#### Scenario: Correlate responses rather than acknowledging a peer's update
+- **WHEN** a peer update arrives while a request is pending
+- **THEN** the client can display the update but keeps further submissions disabled
+  until the matching request ID is acknowledged
+- **AND** late errors for older request IDs cannot clear a newer pending request
+
 #### Scenario: Lose the server connection
 - **WHEN** the connection closes during a hand
 - **THEN** the client displays a disconnected state and disables game requests
@@ -198,7 +230,8 @@ connection is unavailable. It SHALL support a configurable server address.
 The game server SHALL accept local loopback connections only for this milestone.
 Each fixed development player SHALL have at most one active controlling
 connection. The development screen SHALL identify this unauthenticated mode as
-unsuitable for remote or public play.
+unsuitable for remote or public play. Browser handshakes SHALL require a loopback
+web Origin; native local clients without Origin SHALL remain permitted.
 
 #### Scenario: Attempt duplicate control
 - **WHEN** another connection selects a development player that is already
@@ -209,3 +242,23 @@ unsuitable for remote or public play.
 - **WHEN** the game server starts with its supported development configuration
 - **THEN** it does not listen on a public or local-network interface
 - **AND** the live screen labels the mode as local development
+
+#### Scenario: Reject a foreign web page
+- **WHEN** a WebSocket handshake carries a foreign, opaque, or malformed browser Origin
+- **THEN** it is rejected before it can claim a development player
+
+### Requirement: Visible connection presence
+
+The room SHALL notify remaining controllers when a player disconnects or rejoins.
+These presence snapshots SHALL preserve the game revision, chips, cards, and turn
+while reporting an uncontrolled seat as disconnected.
+
+#### Scenario: Opponent disconnects during a turn
+- **WHEN** the acting player's connection closes
+- **THEN** the other player sees that seat as disconnected without an automatic
+  fold or reset
+
+#### Scenario: Opponent rejoins
+- **WHEN** a fresh connection identifies the disconnected player
+- **THEN** both controllers receive current private views at the same game revision
+- **AND** the returning seat recovers its engine-derived status

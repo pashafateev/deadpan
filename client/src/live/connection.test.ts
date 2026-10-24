@@ -84,16 +84,16 @@ describe('authoritative requests and revisions', () => {
     const { connection, socket } = connected();
     const before = connection.getState().snapshot;
     expect(connection.deal(0)).toBe(true);
-    expect(connection.getState().pending).toEqual({ kind: 'deal', expectedSeq: 0 });
+    expect(connection.getState().pending).toEqual({ kind: 'deal', expectedSeq: 0, requestId: 1 });
     expect(connection.getState().snapshot).toBe(before);
     expect(connection.deal(0)).toBe(false);
     expect(connection.act({ kind: 'fold' }, 0)).toBe(false);
     expect(socket.messages()).toEqual([
-      { kind: 'identify', playerId: 'dev-a' }, { kind: 'deal', expectedSeq: 0 },
+      { kind: 'identify', playerId: 'dev-a' }, { kind: 'deal', expectedSeq: 0, requestId: 1 },
     ]);
     socket.message({ kind: 'snapshot', snapshot: snapshot() });
     expect(connection.getState().pending).not.toBeNull();
-    socket.message({ kind: 'snapshot', snapshot: playing() });
+    socket.message({ kind: 'snapshot', snapshot: playing(), replyTo: 1 });
     expect(connection.getState()).toMatchObject({ snapshot: playing(), pending: null });
   });
 
@@ -102,10 +102,10 @@ describe('authoritative requests and revisions', () => {
     const before = connection.getState().snapshot;
     expect(connection.act({ kind: 'raise', to: 60 }, 1)).toBe(true);
     expect(connection.getState().snapshot).toBe(before);
-    expect(connection.getState().pending).toEqual({ kind: 'act', expectedSeq: 1 });
+    expect(connection.getState().pending).toEqual({ kind: 'act', expectedSeq: 1, requestId: 1 });
     expect(connection.act({ kind: 'fold' }, 1)).toBe(false);
-    expect(socket.messages()[1]).toEqual({ kind: 'act', expectedSeq: 1, action: { kind: 'raise', to: 60 } });
-    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 2, turn: { seat: 1, clock: null }, legalActions: null }) });
+    expect(socket.messages()[1]).toEqual({ kind: 'act', expectedSeq: 1, action: { kind: 'raise', to: 60 }, requestId: 1 });
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 2, turn: { seat: 1, clock: null }, legalActions: null }), replyTo: 1 });
     expect(connection.getState().pending).toBeNull();
     expect(connection.getState().snapshot?.seq).toBe(2);
   });
@@ -142,7 +142,7 @@ describe('authoritative requests and revisions', () => {
     const { connection, socket } = connected();
     const before = connection.getState().snapshot;
     connection.deal(0);
-    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Both players must be connected.' });
+    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Both players must be connected.', replyTo: 1 });
     expect(connection.getState()).toMatchObject({
       status: 'connected', pending: null,
       error: { code: 'cannot-deal', message: 'Both players must be connected.' },
@@ -166,6 +166,51 @@ describe('authoritative requests and revisions', () => {
     socket.message({ kind: 'snapshot', snapshot: playing({ seq: 9 }) });
     expect(connection.getState().snapshot).toEqual(playing({ seq: 9 }));
     expect(socket.messages()).toEqual([{ kind: 'identify', playerId: 'dev-a' }]);
+  });
+
+  test('opponent updates cannot acknowledge our request or unlock a second submission', () => {
+    const { connection, socket } = connected(snapshot({ seq: 5 }));
+    connection.deal(5);
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 6 }) });
+    expect(connection.getState().snapshot?.seq).toBe(6);
+    expect(connection.getState().pending?.requestId).toBe(1);
+    expect(connection.act({ kind: 'call' }, 6)).toBe(false);
+    socket.message({ kind: 'error', code: 'stale-state', message: 'Old deal rejected.', replyTo: 1 });
+    expect(connection.getState().pending).toBeNull();
+    expect(connection.act({ kind: 'call' }, 6)).toBe(true);
+    expect(connection.getState().pending?.requestId).toBe(2);
+
+    socket.message({ kind: 'error', code: 'stale-state', message: 'Late old error.', replyTo: 1 });
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 6 }) }); // presence only
+    expect(connection.getState().pending?.requestId).toBe(2);
+    expect(connection.getState().error).toBeNull();
+    expect(connection.act({ kind: 'call' }, 6)).toBe(false);
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 7 }), replyTo: 2 });
+    expect(connection.getState().pending).toBeNull();
+  });
+
+  test('only a matching response resolves pending, including an acknowledgement older than the latest view', () => {
+    const { connection, socket } = connected(playing({ seq: 5 }));
+    connection.act({ kind: 'call' }, 5);
+    socket.message({ kind: 'error', code: 'invalid-message', message: 'Uncorrelated diagnostic.' });
+    expect(connection.getState().pending?.requestId).toBe(1);
+    expect(connection.getState().error).toBeNull();
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 8 }) });
+    socket.message({ kind: 'snapshot', snapshot: playing({ seq: 7 }), replyTo: 1 });
+    expect(connection.getState().snapshot?.seq).toBe(8);
+    expect(connection.getState().pending).toBeNull();
+    socket.message({ kind: 'error', code: 'illegal-action', message: 'Late duplicate error.', replyTo: 1 });
+    expect(connection.getState().error).toBeNull();
+  });
+
+  test('rejected requests retried at the same revision get distinct IDs', () => {
+    const { connection, socket } = connected();
+    connection.deal(0);
+    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Wait for Sam.', replyTo: 1 });
+    connection.deal(0);
+    expect(socket.messages()[2]).toMatchObject({ kind: 'deal', requestId: 2, expectedSeq: 0 });
+    socket.message({ kind: 'error', code: 'cannot-deal', message: 'Old retry response.', replyTo: 1 });
+    expect(connection.getState().pending?.requestId).toBe(2);
   });
 });
 

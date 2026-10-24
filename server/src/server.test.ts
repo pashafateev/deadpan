@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from 'vitest';
-import WebSocket from 'ws';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import WebSocket, { WebSocketServer } from 'ws';
 import type { ClientMessage, ServerMessage, TableSnapshot } from '@deadpan/shared';
 import { startLocalServer } from './server';
 import { TableRoom } from './room';
@@ -8,7 +8,12 @@ import { ACES_BOARD, riggedRandom, seededRandom } from './engine/test-fixtures';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.restoreAllMocks();
 });
+
+type Intent = ClientMessage
+  | Omit<Extract<ClientMessage, { kind: 'deal' }>, 'requestId'>
+  | Omit<Extract<ClientMessage, { kind: 'act' }>, 'requestId'>;
 
 async function start(room = new TableRoom({ randomProvider: seededRandom() })) {
   const server = await startLocalServer({ port: 0, room });
@@ -16,8 +21,9 @@ async function start(room = new TableRoom({ randomProvider: seededRandom() })) {
   return server;
 }
 
-async function connect(port: number) {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+async function connect(port: number, origin?: string) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`, origin === undefined ? {} : { origin });
+  let requestCounter = 0;
   const queue: ServerMessage[] = [];
   let receive: ((message: ServerMessage) => void) | undefined;
   socket.on('message', (raw) => {
@@ -28,7 +34,12 @@ async function connect(port: number) {
   await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
   return {
     socket,
-    send: (message: ClientMessage | string) => socket.send(typeof message === 'string' ? message : JSON.stringify(message)),
+    send: (message: Intent | string) => {
+      const wire = typeof message === 'string' || message.kind === 'identify' ? message : {
+        ...message, requestId: 'requestId' in message ? message.requestId : ++requestCounter,
+      };
+      socket.send(typeof wire === 'string' ? wire : JSON.stringify(wire));
+    },
     next: async (): Promise<ServerMessage> => {
       if (queue.length) return queue.shift()!;
       return new Promise((resolve, reject) => {
@@ -52,7 +63,8 @@ async function snapshot(client: Awaited<ReturnType<typeof connect>>): Promise<Ta
 
 async function players(port: number) {
   const a = await connect(port); const b = await connect(port);
-  a.send({ kind: 'identify', playerId: 'dev-a' }); b.send({ kind: 'identify', playerId: 'dev-b' });
+  a.send({ kind: 'identify', playerId: 'dev-a' }); await snapshot(a);
+  b.send({ kind: 'identify', playerId: 'dev-b' });
   await Promise.all([snapshot(a), snapshot(b)]);
   return { a, b };
 }
@@ -118,11 +130,11 @@ describe('local WebSocket transport', () => {
     a.send({ kind: 'identify', playerId: 'dev-a' });
     expect((await snapshot(a)).seq).toBe(0);
     const b = await connect(server.port);
-    b.send({ kind: 'identify', playerId: 'dev-b' }); await snapshot(b);
+    b.send({ kind: 'identify', playerId: 'dev-b' }); await Promise.all([snapshot(a), snapshot(b)]);
     a.send({ kind: 'deal', expectedSeq: 0 }); await Promise.all([snapshot(a), snapshot(b)]);
-    a.send('{"kind":"act","expectedSeq":1,"playerId":"dev-b","action":{"kind":"fold"}}');
+    a.send('{"kind":"act","expectedSeq":1,"requestId":200,"playerId":"dev-b","action":{"kind":"fold"}}');
     expect(await a.next()).toMatchObject({ kind: 'error', code: 'invalid-message' });
-    a.send('{"kind":"act","expectedSeq":1,"action":{"kind":"raise","to":60.5}}');
+    a.send('{"kind":"act","expectedSeq":1,"requestId":201,"action":{"kind":"raise","to":60.5}}');
     expect(await a.next()).toMatchObject({ kind: 'error', code: 'invalid-message' });
     a.send({ kind: 'act', expectedSeq: 1, action: { kind: 'fold' } });
     const [av, bv] = await Promise.all([snapshot(a), snapshot(b)]);
@@ -146,5 +158,38 @@ describe('local WebSocket transport', () => {
     expect(av.seats.map((seat) => seat.player?.stack)).toEqual([200, 0]);
     b.send({ kind: 'deal', expectedSeq: bv.seq });
     expect(await b.next()).toMatchObject({ kind: 'error', code: 'cannot-deal' });
+  });
+
+  test('allows loopback browser origins and native clients, but rejects foreign and opaque origins', async () => {
+    const server = await start();
+    for (const origin of ['https://evil.example', 'http://localhost.evil.example:5173', 'null']) {
+      await expect(connect(server.port, origin)).rejects.toThrow('Unexpected server response: 401');
+    }
+    const local = await connect(server.port, 'http://localhost:5174');
+    local.send({ kind: 'identify', playerId: 'dev-a' });
+    expect((await snapshot(local)).mySeat).toBe(0);
+    const native = await connect(server.port);
+    native.send({ kind: 'identify', playerId: 'dev-b' });
+    await Promise.all([snapshot(local), snapshot(native)]);
+  });
+
+  test('server errors after listening are reported without crashing or dropping the table', async () => {
+    const emit = vi.spyOn(WebSocketServer.prototype, 'emit');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const server = await start();
+    const raw = emit.mock.contexts.find((value) => value instanceof WebSocketServer) as WebSocketServer | undefined;
+    expect(raw).toBeDefined();
+    expect(() => raw!.emit('error', new Error('Simulated accept failure: EMFILE'))).not.toThrow();
+    expect(log).toHaveBeenCalledWith('Local WebSocket server error:', expect.any(Error));
+    const { a, b } = await players(server.port);
+    a.send({ kind: 'deal', expectedSeq: 0, requestId: 21 });
+    const accepted = await a.next();
+    expect(accepted).toMatchObject({ kind: 'snapshot', replyTo: 21, snapshot: { seq: 1 } });
+    expect(await snapshot(b)).toMatchObject({ seq: 1, handStatus: 'playing' });
+  });
+
+  test('startup listen failures still reject rather than being swallowed by the runtime error handler', async () => {
+    const server = await start();
+    await expect(startLocalServer({ port: server.port })).rejects.toThrow('EADDRINUSE');
   });
 });

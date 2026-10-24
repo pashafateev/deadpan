@@ -1,6 +1,8 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { ActionType as A, PokerEngine } from '@pokertools/engine';
+import type { GameState } from '@pokertools/engine';
 import { EngineAdapter } from './adapter';
-import { ACES_BOARD, THREE_HANDS, riggedRandom, seededRandom } from './test-fixtures';
+import { ACES_BOARD, THREE_HANDS, reachableStates, riggedRandom, seededRandom } from './test-fixtures';
 
 const players = (stacks: number[]) => stacks.map((stack, seat) => ({ id: `p${seat}`, name: `Player ${seat}`, seat, stack }));
 const fixture = (stacks = [1000, 1000], randomProvider = seededRandom()) =>
@@ -13,6 +15,8 @@ const finish = (engine: EngineAdapter) => {
     engine.act(seat, { kind: legal.canCheck ? 'check' : 'call' });
   }
 };
+const jsonView = (engine: EngineAdapter, viewer: number | null) =>
+  JSON.parse(JSON.stringify(engine.view(viewer))) as ReturnType<EngineAdapter['view']>;
 
 describe('EngineAdapter', () => {
   test('waiting view has no actor, cards, or legal actions', () => {
@@ -53,6 +57,40 @@ describe('EngineAdapter', () => {
     expect(engine.view(0)).toEqual(before);
   });
 
+  test.each(['preflop raise', 'postflop opening bet'])('rejects over-stack and unsafe totals before a %s mutates state', (stage) => {
+    const engine = fixture();
+    engine.deal();
+    if (stage === 'postflop opening bet') {
+      engine.act(0, { kind: 'call' });
+      engine.act(1, { kind: 'check' });
+    }
+    const seat = engine.view(null).turn!.seat;
+    const max = engine.view(seat).legalActions!.maxRaiseTo!;
+    const before = [0, 1, null].map((viewer) => jsonView(engine, viewer));
+    for (const to of [max + 1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, -1, 1.5]) {
+      expect(() => engine.act(seat, { kind: 'raise', to })).toThrowError(
+        expect.objectContaining({ code: 'illegal-action' }),
+      );
+      expect([0, 1, null].map((viewer) => jsonView(engine, viewer))).toEqual(before);
+    }
+    // The maximum includes previously posted chips, not just the remaining stack.
+    engine.act(seat, { kind: 'raise', to: max });
+    expect(engine.view(seat).seats[seat]?.player).toMatchObject({ stack: 0, bet: max, status: 'all-in' });
+  });
+
+  test.each(['preflop raise', 'postflop opening bet'])('still accepts a short all-in %s', (stage) => {
+    const engine = fixture([100, 15]);
+    engine.deal();
+    engine.act(0, { kind: 'call' });
+    if (stage === 'postflop opening bet') engine.act(1, { kind: 'check' });
+    const to = stage === 'preflop raise' ? 15 : 5;
+    expect(engine.view(1).legalActions).toMatchObject({ minRaiseTo: to, maxRaiseTo: to });
+    engine.act(1, { kind: 'raise', to });
+    expect(engine.view(1).seats[1]?.player).toMatchObject({ stack: 0, status: 'all-in' });
+    engine.act(0, { kind: 'call' });
+    expect(engine.view(null).handStatus).toBe('complete');
+  });
+
   test('caps a short call by the remaining stack and runs out all-ins', () => {
     const engine = fixture([100, 30]);
     engine.deal();
@@ -62,6 +100,31 @@ describe('EngineAdapter', () => {
     expect(engine.view(0)).toMatchObject({ handStatus: 'complete', turn: null, legalActions: null, pots: [] });
     expect(engine.view(0).board).toHaveLength(5);
     expect(engine.view(0).seats.reduce((sum, seat) => sum + (seat.player?.stack ?? 0), 0)).toBe(130);
+  });
+
+  test.each([
+    { hands: [['As', 'Ah'], ['Kc', 'Kd']], stacks: [130, 0], statuses: ['active', 'sitting-out'] },
+    { hands: [['Kc', 'Kd'], ['As', 'Ah']], stacks: [70, 60], statuses: ['active', 'active'] },
+  ])('settled covered/short all-ins use chip-based statuses: $stacks', ({ hands, stacks, statuses }) => {
+    const engine = fixture([100, 30], riggedRandom(hands, ACES_BOARD));
+    engine.deal();
+    engine.act(0, { kind: 'raise', to: 100 });
+    expect(engine.view(0).seats[0]?.player?.status).toBe('all-in');
+    engine.act(1, { kind: 'call' });
+    const view = jsonView(engine, null);
+    expect(view.handStatus).toBe('complete');
+    expect(view.seats.map((seat) => seat.player?.stack)).toEqual(stacks);
+    expect(view.seats.map((seat) => seat.player?.status)).toEqual(statuses);
+    expect(view.seats.map((seat) => seat.player?.bet)).toEqual([0, 0]);
+  });
+
+  test('an all-in fold winner becomes active while a funded folder stays folded', () => {
+    const engine = fixture();
+    engine.deal();
+    engine.act(0, { kind: 'raise', to: 1000 });
+    engine.act(1, { kind: 'fold' });
+    expect(engine.view(null).seats.map((seat) => [seat.player?.stack, seat.player?.status]))
+      .toEqual([[1010, 'active'], [990, 'folded']]);
   });
 
   test('represents a short all-in as the sole legal raise amount', () => {
@@ -108,6 +171,44 @@ describe('EngineAdapter', () => {
     expect(engine.view(0).winners).toEqual([{ seat: 0, amount: 20, handLabel: '', bestCards: [] }]);
   });
 
+  test('JSON views retain only the folder’s own cards after a fold win', () => {
+    const engine = fixture([1000, 1000], riggedRandom([['As', 'Ah'], ['Kc', 'Kd']], ACES_BOARD));
+    engine.deal();
+    const ownCards = jsonView(engine, 1).seats[1]?.player?.cards;
+    engine.act(0, { kind: 'raise', to: 100 });
+    engine.act(1, { kind: 'fold' });
+    expect(jsonView(engine, 1).seats[1]?.player).toMatchObject({ status: 'folded', cards: ownCards });
+    for (const viewer of [0, null]) {
+      const view = jsonView(engine, viewer);
+      expect(view.seats[1]?.player?.cards).toEqual({ kind: 'none' });
+      expect(JSON.stringify(view)).not.toContain('"rank":"K"');
+    }
+    expect(jsonView(engine, 1).seats[0]?.player?.cards).toEqual({ kind: 'hidden' });
+    expect(jsonView(engine, null).seats[0]?.player?.cards).toEqual({ kind: 'hidden' });
+    expect(jsonView(engine, null).winners[0]?.bestCards).toEqual([]);
+  });
+
+  test('JSON views keep own folded cards private during play and a later contested showdown', () => {
+    const engine = fixture([1000, 1000, 1000], riggedRandom(THREE_HANDS, ACES_BOARD));
+    engine.deal();
+    const ownCards = jsonView(engine, 0).seats[0]?.player?.cards;
+    engine.act(0, { kind: 'fold' });
+    const assertFoldPrivacy = () => {
+      expect(jsonView(engine, 0).seats[0]?.player).toMatchObject({ status: 'folded', cards: ownCards });
+      for (const viewer of [1, 2, null]) {
+        const view = jsonView(engine, viewer);
+        expect(view.seats[0]?.player?.cards).toEqual({ kind: 'none' });
+        for (const suit of ['s', 'h']) expect(JSON.stringify(view)).not.toContain(`"rank":"A","suit":"${suit}"`);
+      }
+    };
+    assertFoldPrivacy();
+    expect(jsonView(engine, 0).seats[1]?.player?.cards).toEqual({ kind: 'hidden' });
+    finish(engine);
+    assertFoldPrivacy();
+    expect(jsonView(engine, null).street).toBe('showdown');
+    expect(jsonView(engine, null).seats.slice(1).every((seat) => seat.player?.cards.kind === 'shown')).toBe(true);
+  });
+
   test('contested showdown reveals contenders and aggregates winnings without double-counting pots', () => {
     const engine = fixture([100, 1000, 1000], riggedRandom(THREE_HANDS, ACES_BOARD));
     engine.deal();
@@ -129,6 +230,61 @@ describe('EngineAdapter', () => {
     engine.deal(); engine.act(0, { kind: 'fold' }); engine.deal();
     expect(engine.view(0)).toMatchObject({ handStatus: 'playing', buttonSeat: 1, smallBlindSeat: 1, bigBlindSeat: 0, winners: [] });
     expect(engine.view(0).seats.map((seat) => seat.player?.stack)).toEqual([985, 1000]);
+  });
+
+  test('60 deterministic hands retain only the current hand graph and preserve engine behavior', () => {
+    const engine = fixture([10000, 10000], seededRandom(73));
+    const control = new PokerEngine({
+      smallBlind: 5, bigBlind: 10, maxPlayers: 2, randomProvider: seededRandom(73), validateIntegrity: true, rakePercent: 0,
+    });
+    players([10000, 10000]).forEach((player) => control.sit(player.seat, player.id, player.name, player.stack));
+    // Observe only the public getter; the adapter does not expose private state.
+    const reads = vi.spyOn(PokerEngine.prototype, 'state', 'get');
+    const dealtCards = new Set<string>();
+    try {
+      for (let hand = 1; hand <= 60; hand++) {
+        expect(control.validate({ type: A.DEAL }).valid).toBe(true);
+        control.deal();
+        engine.deal();
+        let actions = 0;
+        const assertCurrentHand = () => {
+          const reference = control.state;
+          const view = engine.view(null);
+          const state = reads.mock.results.at(-1)!.value as GameState;
+          reads.mockClear(); // Do not let the observation itself retain old graphs.
+          const reachable = reachableStates(state);
+          expect(reachable).toHaveLength(actions + 1);
+          expect([...new Set(reachable.map((past) => past.handNumber))]).toEqual([hand]);
+          expect(view.buttonSeat).toBe((hand - 1) % 2);
+          expect(view.buttonSeat).toBe(reference.buttonSeat);
+          expect(view.turn?.seat ?? null).toBe(reference.actionTo);
+          expect(view.seats.map((seat) => seat.player?.stack)).toEqual(reference.players.map((player) => player?.stack));
+          expect(view.board.map((card) => card.rank + card.suit)).toEqual(reference.board);
+          for (const seat of [0, 1]) {
+            const cards = engine.view(seat).seats[seat]?.player?.cards;
+            expect(cards?.kind).toBe('shown');
+            if (cards?.kind === 'shown') expect(cards.cards.map((card) => card.rank + card.suit)).toEqual(reference.players[seat]?.hand);
+          }
+          reads.mockClear();
+          return view;
+        };
+        let view = assertCurrentHand();
+        dealtCards.add(JSON.stringify(engine.view(0).seats[0]?.player?.cards));
+        while (view.handStatus === 'playing') {
+          expect(actions).toBeLessThan(20);
+          const seat = view.turn!.seat;
+          const legal = engine.view(seat).legalActions!;
+          const kind = hand % 2 === 0 ? 'fold' : legal.canCheck ? 'check' : 'call';
+          control.act({ type: kind === 'fold' ? A.FOLD : kind === 'check' ? A.CHECK : A.CALL, playerId: `p${seat}` });
+          engine.act(seat, { kind });
+          actions++;
+          view = assertCurrentHand();
+        }
+      }
+      expect(dealtCards.size).toBeGreaterThan(1);
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   test('an odd chip in a tied pot goes to the first eligible seat left of the button', () => {

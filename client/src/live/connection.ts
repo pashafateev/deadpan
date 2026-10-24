@@ -24,7 +24,7 @@ export interface ConnectionState {
   status: 'disconnected' | 'connecting' | 'identifying' | 'connected';
   playerId: DevelopmentPlayerId | null;
   snapshot: TableSnapshot | null;
-  pending: { kind: 'deal' | 'act'; expectedSeq: number } | null;
+  pending: { kind: 'deal' | 'act'; expectedSeq: number; requestId: number } | null;
   error: ConnectionError | null;
 }
 
@@ -41,6 +41,9 @@ const INVALID_RESPONSE: ConnectionError = {
   message: 'The server sent an unexpected response. Reconnect before continuing.',
 };
 const OPEN = 1;
+type RequestIntent =
+  | Omit<Extract<ClientMessage, { kind: 'deal' }>, 'requestId'>
+  | Omit<Extract<ClientMessage, { kind: 'act' }>, 'requestId'>;
 
 /**
  * Owns transport state, not poker state. Only incoming snapshots change the
@@ -57,6 +60,7 @@ export function createConnection(options: {
   };
   let socket: LiveSocket | null = null;
   let disposed = false;
+  let requestCounter = 0;
   const listeners = new Set<() => void>();
   const update = (patch: Partial<ConnectionState>) => {
     state = { ...state, ...patch };
@@ -128,7 +132,9 @@ export function createConnection(options: {
       if (message.kind === 'error') {
         const error = { code: message.code, message: message.message };
         if (state.status === 'identifying') stop(error);
-        else update({ error, pending: null });
+        else if (state.pending) {
+          if (message.replyTo === state.pending.requestId) update({ error, pending: null });
+        } else if (message.replyTo === undefined) update({ error });
         return;
       }
 
@@ -138,11 +144,15 @@ export function createConnection(options: {
         return;
       }
       const initial = state.status === 'identifying';
+      const acknowledged = state.pending !== null && message.replyTo === state.pending.requestId;
       // A deliberate new connection may see seq reset after a server restart.
-      if (!initial && state.snapshot && view.seq < state.snapshot.seq) return;
+      if (!initial && state.snapshot && view.seq < state.snapshot.seq) {
+        if (acknowledged) update({ pending: null });
+        return;
+      }
       update({
         status: 'connected', snapshot: view, error: null,
-        pending: state.pending && view.seq <= state.pending.expectedSeq ? state.pending : null,
+        pending: acknowledged ? null : state.pending,
       });
     };
     current.onerror = () => {
@@ -153,7 +163,7 @@ export function createConnection(options: {
     };
   };
 
-  const submit = (message: Exclude<ClientMessage, { kind: 'identify' }>): boolean => {
+  const submit = (message: RequestIntent): boolean => {
     const view = state.snapshot;
     if (disposed || state.status !== 'connected' || !view || state.pending || message.expectedSeq !== view.seq) {
       return false;
@@ -161,8 +171,9 @@ export function createConnection(options: {
     if (message.kind === 'deal' ? view.handStatus === 'playing' : tableControls(view) !== 'actions') {
       return false;
     }
-    update({ pending: { kind: message.kind, expectedSeq: message.expectedSeq }, error: null });
-    return send(message);
+    const requestId = ++requestCounter;
+    update({ pending: { kind: message.kind, expectedSeq: message.expectedSeq, requestId }, error: null });
+    return send({ ...message, requestId });
   };
 
   return {
