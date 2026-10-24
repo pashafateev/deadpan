@@ -1,8 +1,9 @@
 # Handoff
 
-Implementation state for `local-playable-hand`, prepared for review on
-`feature/local-playable-hand`. This is a local-development milestone rather
-than the production launch. Update this file in the same PR as the change.
+Implementation state after `local-playable-hand` merged in
+[PR #24](https://github.com/pashafateev/deadpan/pull/24). The completed OpenSpec
+change is archived. This is a local-development milestone rather than the
+production launch. Update this file in the same PR as the change.
 
 ## Summary
 
@@ -32,8 +33,9 @@ Two fixed development players begin with 1,000 chips and 5/10 blinds. Both must
 be connected and funded to deal manually; stacks carry forward and the button
 rotates. All-ins run out automatically, and a bust prevents the next deal.
 Restart the server to reset, then reconnect manually. See
-[the change tasks](../openspec/changes/local-playable-hand/tasks.md) for current
-progress and [the recovery boundary](architecture.md#selected-engine-and-recovery-boundary)
+[the archived tasks](../openspec/changes/archive/2026-10-24-local-playable-hand/tasks.md)
+for the completed milestone, [the gameplay spec](../openspec/specs/table-gameplay/spec.md)
+for current requirements, and [the recovery boundary](architecture.md#selected-engine-and-recovery-boundary)
 for the selected engine's supported APIs and remaining persistence work.
 
 The scope remains local-only and in-memory. Do not adopt the upstream API's
@@ -145,8 +147,8 @@ Dependencies stated in the issues:
 A workable order: #3, then #4, then #5, #6 and #7, then the core game (see
 below), then #8 to #11, then #12 to #14.
 
-**The core local game is tracked by the `local-playable-hand` OpenSpec change,**
-not a new GitHub issue. It implements the adapter, local room, and live client.
+**The core local game shipped in PR #24; its `local-playable-hand` OpenSpec
+change is archived.** It implements the adapter, local room, and live client.
 Turn timers/pre-actions, the event player, lobby, and production orchestration
 still need later work. Several launch issues assume those features; see
 `docs/architecture.md` and the change's issue-alignment table before proceeding.
